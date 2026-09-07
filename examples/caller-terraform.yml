@@ -1,0 +1,38 @@
+# Copy into the product infra repo as .github/workflows/terraform-dev.yml
+name: Terraform Dev
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "environments/dev/**"
+      - "bootstrap/**"
+      - ".github/workflows/terraform-dev.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "environments/dev/**"
+      - "bootstrap/**"
+      - ".github/workflows/terraform-dev.yml"
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: terraform-dev
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    uses: agentic-goose/gcp-platform/.github/workflows/terraform.yml@main
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    secrets: inherit
+    with:
+      working-directory: environments/dev
+      apply: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}

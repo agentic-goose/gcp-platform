@@ -1,0 +1,35 @@
+name: Validate modules
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - modules/bootstrap
+          - modules/artifact-registry
+          - modules/cloud-run-app
+          - modules/secrets
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+
+      - name: Format
+        run: terraform fmt -check -recursive
+
+      - name: Init and validate
+        working-directory: ${{ matrix.module }}
+        run: |
+          terraform init -backend=false
+          terraform validate

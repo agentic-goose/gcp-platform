@@ -1,0 +1,64 @@
+name: "Docker GAR build"
+
+description: >-
+  Build a Docker image with Buildx and GHA cache. On push=true, authenticate
+  with WIF and push to Artifact Registry. Does not deploy.
+
+inputs:
+  image:
+    description: Full image tag including registry (region-docker.pkg.dev/...)
+    required: true
+  push:
+    description: "Push to Artifact Registry (true/false)"
+    required: true
+  project_id:
+    required: true
+  region:
+    required: true
+  workload_identity_provider:
+    required: true
+  service_account:
+    description: Deploy service account email
+    required: true
+  context:
+    description: Docker build context
+    required: false
+    default: "."
+  build_args:
+    description: Newline-separated KEY=VALUE build-args
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Authenticate to Google Cloud
+      if: inputs.push == 'true'
+      id: auth
+      uses: google-github-actions/auth@v3
+      with:
+        project_id: ${{ inputs.project_id }}
+        workload_identity_provider: ${{ inputs.workload_identity_provider }}
+        service_account: ${{ inputs.service_account }}
+        token_format: access_token
+
+    - name: Log in to Artifact Registry
+      if: inputs.push == 'true'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ inputs.region }}-docker.pkg.dev
+        username: oauth2accesstoken
+        password: ${{ steps.auth.outputs.access_token }}
+
+    - name: Build and push
+      uses: docker/build-push-action@v6
+      with:
+        context: ${{ inputs.context }}
+        push: ${{ inputs.push }}
+        tags: ${{ inputs.image }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: ${{ inputs.build_args }}
