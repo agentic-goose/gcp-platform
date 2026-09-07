@@ -1,5 +1,8 @@
 **/.terraform/*
 
+# Roots that apply pin providers; this repo only publishes modules.
+**/.terraform.lock.hcl
+
 *.tfstate
 *.tfstate.*
 *.tfstate.backup
