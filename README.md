@@ -2,7 +2,7 @@
 
 Shared **library** for Agentic Goose GCP projects: Terraform modules and GitHub Actions.
 
-This repo is not a Terraform root. It has no remote state and is never applied to a project. Product infra repos (`ironzone-infra`, `oncall-install-infra`, a new project) call these modules and workflows.
+This repo is not a Terraform root. It has no remote state and is never applied to a project. Product infra repos (`ironzone-quickbooks-infra`, `oncall-install-infra`, a new project) call these modules and workflows.
 
 ## Layout
 
