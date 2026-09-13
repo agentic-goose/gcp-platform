@@ -43,4 +43,6 @@ module "bootstrap" {
 
 ## Callers must grant Actions access
 
-Reusable workflows and composite actions in this (private) repo require each caller repo to be allowed under **Settings → Actions → Access**.
+Reusable workflows and composite actions in this (private) repo require **Settings → Actions → Access** to allow other `agentic-goose` repositories (`user` on this account). Callers that clone Terraform modules from here also need secret `GCP_PLATFORM_READ_TOKEN`.
+
+The reusable Terraform workflow accepts `github_environment` (empty = repo vars), `require_platform_token`, and `plan_marker`.
