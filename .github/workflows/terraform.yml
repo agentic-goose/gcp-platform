@@ -12,6 +12,24 @@ on:
         required: false
         type: boolean
         default: false
+      github_environment:
+        description: GitHub Environment for vars/secrets. Empty uses repo-level values.
+        required: false
+        type: string
+        default: ""
+      require_platform_token:
+        description: Fail if GCP_PLATFORM_READ_TOKEN is missing (needed to clone this private repo)
+        required: false
+        type: boolean
+        default: false
+      plan_marker:
+        description: HTML marker so prod and dev plan comments do not overwrite each other
+        required: false
+        type: string
+        default: terraform-plan
+    secrets:
+      GCP_PLATFORM_READ_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -21,6 +39,7 @@ permissions:
 jobs:
   terraform:
     runs-on: ubuntu-latest
+    environment: ${{ inputs.github_environment }}
 
     defaults:
       run:
@@ -37,10 +56,30 @@ jobs:
       TF_VAR_github_org_id: ${{ vars.GITHUB_ORG_ID }}
       TF_VAR_github_infra_repo_id: ${{ vars.INFRA_REPO_ID }}
       TF_VAR_terraform_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      TF_VAR_github_ghl_repo_id: ${{ vars.GHL_REPO_ID }}
+      TF_VAR_ghl_location_id: ${{ vars.GHL_LOCATION_ID }}
+      TF_VAR_ghl_pipeline_id: ${{ vars.GHL_PIPELINE_ID }}
+      TF_VAR_ghl_new_lead_stage_id: ${{ vars.GHL_NEW_LEAD_STAGE_ID }}
+      TF_VAR_ghl_attach_secrets: ${{ vars.GHL_ATTACH_SECRETS }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Allow Terraform to clone private gcp-platform modules
+        env:
+          TOKEN: ${{ secrets.GCP_PLATFORM_READ_TOKEN }}
+          REQUIRE_TOKEN: ${{ inputs.require_platform_token }}
+        run: |
+          if [ -z "${TOKEN}" ]; then
+            if [ "${REQUIRE_TOKEN}" = "true" ]; then
+              echo "GCP_PLATFORM_READ_TOKEN is empty. Set it on the GitHub environment or repo (read access to gcp-platform)."
+              exit 1
+            fi
+            echo "GCP_PLATFORM_READ_TOKEN unset; skipping private-module git rewrite."
+            exit 0
+          fi
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
@@ -71,9 +110,10 @@ jobs:
         uses: actions/github-script@v7
         env:
           PLAN: ${{ steps.plan.outputs.stdout }}
+          MARKER: "<!-- ${{ inputs.plan_marker }} -->"
         with:
           script: |
-            const marker = '<!-- terraform-plan -->';
+            const marker = process.env.MARKER;
             const plan = process.env.PLAN || '(empty plan output)';
             const truncated =
               plan.length > 55000 ? `${plan.slice(0, 55000)}\n...truncated...` : plan;
