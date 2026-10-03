@@ -35,8 +35,9 @@ The budget defaults to $25 with 10/15/25/50/100% thresholds ($2.50, $3.75,
 $6.25, $12.50, $25). Set the amount and fractions explicitly when adopting an
 existing budget. The budget uses the numeric project identifier resolved by
 `google_project`; budget API filters cannot use the textual project ID.
-Budget notifications use the email channel, with default billing IAM recipients
-disabled. A budget sends alerts; it does not cap spending.
+Set `budget_scope = "BILLING_ACCOUNT"` when adopting an account-wide budget;
+the default `PROJECT` scope limits spending to the specified project.
+Budget notifications add the email channel and retain default billing IAM recipients. A budget sends alerts; it does not cap spending.
 
 ## Permissions and existing resources
 

@@ -98,3 +98,14 @@ variable "terraform_ci_service_account" {
   type        = string
   default     = null
 }
+
+variable "budget_scope" {
+  description = "PROJECT filters to this project; BILLING_ACCOUNT preserves an account-wide budget when importing one."
+  type        = string
+  default     = "PROJECT"
+
+  validation {
+    condition     = contains(["PROJECT", "BILLING_ACCOUNT"], var.budget_scope)
+    error_message = "budget_scope must be PROJECT or BILLING_ACCOUNT."
+  }
+}

@@ -105,3 +105,22 @@ run "reject_duplicate_check_names" {
   }
   expect_failures = [var.uptime_checks]
 }
+
+run "adopt_account_budget" {
+  command = plan
+  variables {
+    billing_account_id        = "000000-000000-000000"
+    budget_scope              = "BILLING_ACCOUNT"
+    budget_amount             = 25
+    budget_threshold_percents = [0.5, 0.9, 1.0, 1.5]
+  }
+  assert {
+    condition = (
+      google_billing_budget.monthly[0].budget_filter[0].projects == null &&
+      length(data.google_project.budget) == 0 &&
+      !google_billing_budget.monthly[0].all_updates_rule[0].disable_default_iam_recipients &&
+      toset([for rule in google_billing_budget.monthly[0].threshold_rules : rule.threshold_percent]) == toset([0.5, 0.9, 1.0, 1.5])
+    )
+    error_message = "Adopting an account-wide budget must preserve account scope, IAM recipients and chosen thresholds."
+  }
+}

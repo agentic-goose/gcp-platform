@@ -167,7 +167,7 @@ resource "google_monitoring_alert_policy" "cloud_run_5xx" {
 }
 
 data "google_project" "budget" {
-  count      = local.billing_budget_enabled ? 1 : 0
+  count      = local.billing_budget_enabled && var.budget_scope == "PROJECT" ? 1 : 0
   project_id = var.project_id
 }
 
@@ -178,7 +178,7 @@ resource "google_billing_budget" "monthly" {
   display_name    = var.budget_display_name
 
   budget_filter {
-    projects        = ["projects/${data.google_project.budget[0].number}"]
+    projects        = var.budget_scope == "PROJECT" ? ["projects/${data.google_project.budget[0].number}"] : null
     calendar_period = "MONTH"
   }
 
@@ -200,7 +200,7 @@ resource "google_billing_budget" "monthly" {
     monitoring_notification_channels = [
       google_monitoring_notification_channel.email.id,
     ]
-    disable_default_iam_recipients = true
+    disable_default_iam_recipients = false
   }
 
   depends_on = [google_project_service.billingbudgets]
