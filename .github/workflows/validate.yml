@@ -10,6 +10,67 @@ permissions:
   contents: read
 
 jobs:
+  # Calls the Hosting action rather than linting it. Nothing else in this repo
+  # exercises a composite action, so until now the only thing that discovered
+  # a broken one was a caller's failing deploy. deploy=false does not
+  # authenticate, so this needs no credentials and publishes nothing.
+  hosting-action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Accept a built site
+        uses: ./.github/actions/firebase-hosting-deploy
+        with:
+          config: firebase.json
+          deploy: "false"
+          project_id: fixture-project
+          workload_identity_provider: unused
+          service_account: unused
+          working-directory: .github/fixtures/hosting-site
+
+      - name: Refuse a config whose public directory was never built
+        id: unbuilt
+        continue-on-error: true
+        uses: ./.github/actions/firebase-hosting-deploy
+        with:
+          config: firebase.unbuilt.json
+          deploy: "false"
+          project_id: fixture-project
+          workload_identity_provider: unused
+          service_account: unused
+          working-directory: .github/fixtures/hosting-site
+
+      - name: Refuse a config that does not exist
+        id: absent
+        continue-on-error: true
+        uses: ./.github/actions/firebase-hosting-deploy
+        with:
+          config: no-such-firebase.json
+          deploy: "false"
+          project_id: fixture-project
+          workload_identity_provider: unused
+          service_account: unused
+          working-directory: .github/fixtures/hosting-site
+
+      # Without this the two cases above would pass by being skipped, which is
+      # the failure mode continue-on-error invites.
+      - name: Both bad configs must have failed
+        env:
+          UNBUILT: ${{ steps.unbuilt.outcome }}
+          ABSENT: ${{ steps.absent.outcome }}
+        run: |
+          set -euo pipefail
+          status=0
+          for case in UNBUILT ABSENT; do
+            outcome="${!case}"
+            if [ "${outcome}" != "failure" ]; then
+              echo "${case} was expected to fail; outcome was ${outcome}" >&2
+              status=1
+            fi
+          done
+          exit "${status}"
+
   validate:
     runs-on: ubuntu-latest
     strategy:
