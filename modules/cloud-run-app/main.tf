@@ -41,6 +41,19 @@ resource "google_service_account_iam_member" "terraform_ci_runtime_user" {
   member = "serviceAccount:${var.terraform_ci_service_account}"
 }
 
+# Granted per member rather than as one authoritative binding, so this module
+# never removes an invoker another configuration added to the same service.
+resource "google_cloud_run_v2_service_iam_member" "invokers" {
+  for_each = toset(var.invokers)
+
+  project  = var.project_id
+  location = google_cloud_run_v2_service.this.location
+  name     = google_cloud_run_v2_service.this.name
+
+  role   = "roles/run.invoker"
+  member = each.value
+}
+
 resource "google_cloud_run_v2_service" "this" {
   project  = var.project_id
   name     = var.name

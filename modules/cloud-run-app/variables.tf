@@ -45,9 +45,48 @@ variable "artifact_registry_repository" {
 }
 
 variable "invoker_iam_disabled" {
-  description = "If true, the service is publicly invokable (no IAM on invoke)"
+  # Required on purpose, with no default in either direction.
+  #
+  # It used to default to true, so every caller that said nothing published its
+  # service to the internet — which is how both services on the first project
+  # ended up publicly invokable without anyone choosing it. Flipping the
+  # default to false would have fixed that case and created a worse one: a
+  # caller pinning an older commit inherits the old default until it bumps its
+  # ref, and the bump would then silently take a working public service
+  # private. In this stack that would break GoHighLevel webhook delivery, whose
+  # sender cannot present a Google OIDC token, and a Firebase Hosting rewrite,
+  # which has no service agent that can be granted roles/run.invoker.
+  #
+  # So neither default is safe: one publishes by omission, the other revokes by
+  # omission. With no default, Terraform refuses to plan until the caller says
+  # which it wants, and a pin bump fails loudly at plan time rather than
+  # changing who can reach the service. Exposure is a decision, so it is stated
+  # at the call site, next to the reason.
+  description = "If true, the service is publicly invokable (no IAM on invoke). Set false and name invokers unless the service must answer requests from senders that cannot authenticate to Google."
   type        = bool
-  default     = true
+}
+
+variable "invokers" {
+  # What makes a private service usable. Without this the module could only
+  # produce a service nothing was allowed to call, so the only way to make one
+  # reachable was invoker_iam_disabled = true — a default of false would have
+  # pushed every caller straight back to public. Eventarc, Cloud Scheduler and
+  # a calling service each need naming here instead.
+  description = "Members granted roles/run.invoker, e.g. [\"serviceAccount:eventarc@project.iam.gserviceaccount.com\"]. A private service is unreachable until something is listed here or granted the role elsewhere."
+  type        = list(string)
+  default     = []
+
+  validation {
+    # roles/run.invoker takes a principal, and an IAM binding with a bare
+    # email is accepted by Terraform and rejected by the API at apply time,
+    # which is a slow way to find a typo.
+    condition = alltrue([
+      for member in var.invokers :
+      can(regex("^(serviceAccount|user|group|domain|principal|principalSet|allUsers|allAuthenticatedUsers):", member)) ||
+      contains(["allUsers", "allAuthenticatedUsers"], member)
+    ])
+    error_message = "Each invoker must be a fully qualified IAM member, such as serviceAccount:name@project.iam.gserviceaccount.com."
+  }
 }
 
 variable "deletion_protection" {

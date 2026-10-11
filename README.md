@@ -10,7 +10,7 @@ This repo is not a Terraform root. It has no remote state and is never applied t
 modules/
   bootstrap/           # WIF, terraform-ci SA, baseline APIs and CI IAM
   artifact-registry/   # Docker repo + cleanup policies
-  cloud-run-app/       # runtime/deploy SAs, Cloud Run service, WIF for the app repo
+  cloud-run-app/       # runtime/deploy SAs, Cloud Run service, WIF for the app repo (private by default)
   secrets/             # Secret Manager containers + per-secret IAM
   monitoring/          # HTTPS uptime, Cloud Run 5xx, email and billing alerts
 .github/
@@ -22,6 +22,35 @@ examples/
   caller-deploy.yml          # containerised app on Cloud Run
   caller-deploy-static.yml   # site served directly by Firebase Hosting
   root/main.tf         # thin root showing how to stitch modules
+```
+
+### Cloud Run exposure has to be stated
+
+`cloud-run-app` requires `invoker_iam_disabled`. There is no default in either direction, and that is deliberate — neither one is safe:
+
+- It used to default to `true`, so a caller that said nothing **published its service to the internet**. That is how the first project ended up with two publicly invokable services without anyone choosing it.
+- Defaulting to `false` instead would fix that and create a worse problem. Callers pin a commit, so a caller keeps the old default until it bumps its ref — and the bump would then **silently take a working public service private**. Here that would break GoHighLevel webhook delivery, whose sender cannot present a Google OIDC token, and a Firebase Hosting rewrite, which has no service agent that can be granted `roles/run.invoker`.
+
+One publishes by omission, the other revokes by omission. With no default, `terraform validate` refuses the configuration until the caller says which it wants, so a pin bump fails at review time rather than changing who can reach a running service.
+
+```hcl
+module "sync" {
+  source = "git::https://github.com/agentic-goose/gcp-platform.git//modules/cloud-run-app?ref=<full-commit-sha>"
+
+  # Private, reachable only by what is named below.
+  invoker_iam_disabled = false
+  invokers             = ["serviceAccount:${google_service_account.eventarc.email}"]
+  # ...
+}
+```
+
+`invokers` grants `roles/run.invoker` per member, so this module never removes an invoker another configuration added to the same service. Each entry must be a fully qualified IAM member (`serviceAccount:`, `user:`, `group:`, …) — a bare email is accepted by Terraform and rejected by the API at apply time.
+
+Set `invoker_iam_disabled = true` only for a service that must answer senders which cannot authenticate to Google, and put the reason beside it:
+
+```hcl
+  # GHL webhooks are public HTTPS POSTs; /webhooks/ghl checks a shared secret.
+  invoker_iam_disabled = true
 ```
 
 SQL, Firebase, DNS, and bastions stay in the product repo until a second project needs them. Firebase *Hosting deployment* is the exception: it is an Actions concern rather than Terraform, and the two delivery shapes this account runs — a container on Cloud Run and a static site on Hosting — now have one action each, so a new front end does not start from a copied workflow.
