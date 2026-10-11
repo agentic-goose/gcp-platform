@@ -96,7 +96,37 @@ jobs:
           terraform init -backend=false
           terraform validate
 
-      - name: Test monitoring plans
-        if: matrix.module == 'modules/monitoring'
-        working-directory: modules/monitoring
-        run: terraform test
+      # Mutation testing showed this is the one property nothing else guards:
+      # the module tests all set invoker_iam_disabled explicitly, so re-adding
+      # a default does not fail them, and "required" is not expressible as a
+      # terraform test — expect_failures covers validation blocks, while a
+      # missing required variable is a configuration error. Checked by presence
+      # of the variable, so it is a no-op for modules that do not declare it.
+      - name: Check Cloud Run exposure cannot be inherited
+        working-directory: ${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          [ -f variables.tf ] || exit 0
+          block=$(awk '/^variable "invoker_iam_disabled"/{f=1} f&&/^\}/{f=0;print;next} f' variables.tf)
+          if [ -z "${block}" ]; then
+            echo "No invoker_iam_disabled in ${{ matrix.module }}; nothing to check."
+            exit 0
+          fi
+          if printf '%s\n' "${block}" | grep -qE '^[[:space:]]*default[[:space:]]*='; then
+            echo "::error::invoker_iam_disabled must have no default. One default publishes a service by omission, the other revokes it by omission; the caller has to state which it wants." >&2
+            exit 1
+          fi
+          echo "invoker_iam_disabled is required, as intended."
+
+      # Named by presence, not by module. The previous step hardcoded
+      # modules/monitoring, so a second module's tests would have been written
+      # and never run — the same shape as the app repo's orphaned suite.
+      - name: Test module plans
+        working-directory: ${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          if [ -d tests ] && ls tests/*.tftest.hcl >/dev/null 2>&1; then
+            terraform test
+          else
+            echo "No tests/*.tftest.hcl in ${{ matrix.module }}; nothing to run."
+          fi
