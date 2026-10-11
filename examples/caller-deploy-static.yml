@@ -1,0 +1,99 @@
+# Copy into the product app repo as .github/workflows/deploy.yml for a site
+# served directly by Firebase Hosting. For a containerised app on Cloud Run,
+# use caller-deploy.yml instead.
+#
+# The pattern this shows: validate on every pull request, publish only from
+# main (or to a non-production project on request), and name each target's
+# project exactly once — in .firebaserc, as a Firebase alias. The deploy
+# action takes a resolved project id rather than an alias, so the workflow log
+# shows which project a run publishes to.
+name: Build and Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deploy target
+        type: choice
+        options: [prod, dev]
+        default: dev
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.target || 'prod' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FIREBASE_TOOLS: "15.28.1"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test
+      - run: npm run build
+      # deploy=false installs the same pinned CLI and checks the built config
+      # without authenticating, so a pull request catches a broken or
+      # mis-pathed firebase.json before main can.
+      - uses: agentic-goose/gcp-platform/.github/actions/firebase-hosting-deploy@main
+        with:
+          config: firebase.json
+          deploy: "false"
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          firebase_tools_version: ${{ env.FIREBASE_TOOLS }}
+
+  deploy:
+    needs: validate
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && (inputs.target == 'dev' || github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    # An empty environment name means repository variables, so production
+    # settings are the repo's and every other target gets its own environment.
+    environment: ${{ inputs.target == 'dev' && 'dev' || '' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          # Whatever the build inlines and cannot recover afterwards.
+          DEPLOY_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      # The guard worth copying: GCP_PROJECT_ID comes from the environment the
+      # target selected, so nothing otherwise notices if that variable is set
+      # to the wrong project. Resolving the target's .firebaserc alias and
+      # refusing to continue unless the two agree is what catches it. See
+      # oncall-install-app scripts/deploy-project.mjs for an implementation.
+      - name: Check the deploy target resolves to this project
+        env:
+          DEPLOY_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          DEPLOY_TARGET: ${{ inputs.target || 'prod' }}
+        run: node scripts/deploy-project.mjs
+      - uses: agentic-goose/gcp-platform/.github/actions/firebase-hosting-deploy@main
+        with:
+          config: firebase.json
+          deploy: "true"
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          firebase_tools_version: ${{ env.FIREBASE_TOOLS }}
+          message: ${{ github.sha }}

@@ -1,0 +1,107 @@
+name: "Firebase Hosting deploy"
+
+description: >-
+  Install the pinned Firebase CLI and check a prepared Hosting config. On
+  deploy=true, authenticate with WIF and publish that config to the project.
+  Does not build the site and does not touch Functions, Firestore or rules.
+
+inputs:
+  config:
+    description: >-
+      Path to the firebase.json to publish, relative to the working directory.
+      Must already exist and name a hosting public directory; build the site
+      before calling this.
+    required: true
+  deploy:
+    description: >-
+      "true" to publish. "false" installs the CLI and checks the config
+      without authenticating or publishing, which is what a pull request wants.
+    required: true
+  project_id:
+    description: >-
+      The resolved Firebase/GCP project id. Resolve a .firebaserc alias in the
+      caller; this action passes the value through unchanged so what it
+      publishes to is visible in the caller's own workflow.
+    required: true
+  workload_identity_provider:
+    required: true
+  service_account:
+    description: Deploy service account email
+    required: true
+  message:
+    description: Release message recorded in Hosting release history
+    required: false
+    default: ""
+  firebase_tools_version:
+    description: >-
+      Exact firebase-tools version. Pinned because the CLI changes deploy
+      behaviour between minors; callers that test against a version should
+      pass the same one here.
+    required: false
+    default: "15.28.1"
+  working-directory:
+    description: Directory the config path is relative to
+    required: false
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    # Checked before the CLI is installed and before anything authenticates, so
+    # a missing or mis-pathed config fails in seconds and says which path it
+    # looked at, rather than surfacing as a Firebase error after a WIF round
+    # trip. `hosting.public` is the one key a Hosting deploy cannot proceed
+    # without: without it the CLI deploys nothing and still reports success.
+    - name: Check the Hosting config
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        config="${{ inputs.config }}"
+        if [ ! -f "${config}" ]; then
+          echo "Hosting config not found: ${config} (in $(pwd))" >&2
+          exit 1
+        fi
+        public="$(jq -r '.hosting.public // empty' "${config}")"
+        if [ -z "${public}" ]; then
+          echo "${config} does not name a hosting.public directory." >&2
+          exit 1
+        fi
+        directory="$(dirname "${config}")/${public}"
+        if [ ! -d "${directory}" ]; then
+          echo "${config} names hosting.public ${public}, but ${directory} does not exist." >&2
+          echo "Build the site before calling this action." >&2
+          exit 1
+        fi
+        echo "Publishing ${directory} from ${config}."
+
+    - name: Install the Firebase CLI
+      shell: bash
+      run: npm install --global "firebase-tools@${{ inputs.firebase_tools_version }}"
+
+    - name: Authenticate to Google Cloud
+      if: inputs.deploy == 'true'
+      uses: google-github-actions/auth@v3
+      with:
+        project_id: ${{ inputs.project_id }}
+        workload_identity_provider: ${{ inputs.workload_identity_provider }}
+        service_account: ${{ inputs.service_account }}
+
+    - name: Deploy Hosting
+      if: inputs.deploy == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        # Through the environment, not the command line: a release message is
+        # caller-supplied text and interpolating it into the command would let
+        # a quote or a backtick in it run as shell.
+        RELEASE_MESSAGE: ${{ inputs.message }}
+        DEPLOY_PROJECT: ${{ inputs.project_id }}
+        DEPLOY_CONFIG: ${{ inputs.config }}
+      run: |
+        set -euo pipefail
+        args=(deploy --only hosting --project "${DEPLOY_PROJECT}" --config "${DEPLOY_CONFIG}" --non-interactive)
+        if [ -n "${RELEASE_MESSAGE}" ]; then
+          args+=(--message "${RELEASE_MESSAGE}")
+        fi
+        firebase "${args[@]}"
