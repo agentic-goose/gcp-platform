@@ -9,7 +9,7 @@ This repo is not a Terraform root. It has no remote state and is never applied t
 ```
 modules/
   bootstrap/           # WIF, terraform-ci SA, baseline APIs and CI IAM
-  artifact-registry/   # Docker repo + cleanup policies
+  artifact-registry/   # Docker repo; cleanup policies are opt-in (null = none)
   cloud-run-app/       # runtime/deploy SAs, Cloud Run service, WIF for the app repo (private by default)
   secrets/             # Secret Manager containers + per-secret IAM
   monitoring/          # HTTPS uptime, Cloud Run 5xx, email and billing alerts
