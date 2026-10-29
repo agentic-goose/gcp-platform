@@ -97,26 +97,45 @@ jobs:
           terraform validate
 
       # Mutation testing showed this is the one property nothing else guards:
-      # the module tests all set invoker_iam_disabled explicitly, so re-adding
-      # a default does not fail them, and "required" is not expressible as a
-      # terraform test — expect_failures covers validation blocks, while a
-      # missing required variable is a configuration error. Checked by presence
-      # of the variable, so it is a no-op for modules that do not declare it.
-      - name: Check Cloud Run exposure cannot be inherited
+      # A module must not decide something irreversible for a caller that said
+      # nothing. Two variables have earned that treatment so far, for the same
+      # reason in opposite domains:
+      #
+      #   invoker_iam_disabled — one default publishes a service by omission,
+      #     the other revokes it by omission.
+      #   cleanup_policies     — one default deletes images by omission, the
+      #     other lets a registry grow by omission. The first of those was
+      #     caught about to delete the images a production environment was
+      #     running, thirty-one days after its last deploy.
+      #
+      # Neither is expressible as a terraform test: expect_failures covers
+      # validation blocks and pre/postconditions, while a missing required
+      # variable is a configuration error that fails the run rather than
+      # reporting a checkable object. So the check reads variables.tf.
+      #
+      # A list, not a copied step. The step below carries a comment about a
+      # hardcoded module path that would have left a second module's tests
+      # written and never run; a second hardcoded step here is that same shape.
+      - name: Check nothing irreversible can be inherited by omission
         working-directory: ${{ matrix.module }}
         run: |
           set -euo pipefail
           [ -f variables.tf ] || exit 0
-          block=$(awk '/^variable "invoker_iam_disabled"/{f=1} f&&/^\}/{f=0;print;next} f' variables.tf)
-          if [ -z "${block}" ]; then
-            echo "No invoker_iam_disabled in ${{ matrix.module }}; nothing to check."
-            exit 0
-          fi
-          if printf '%s\n' "${block}" | grep -qE '^[[:space:]]*default[[:space:]]*='; then
-            echo "::error::invoker_iam_disabled must have no default. One default publishes a service by omission, the other revokes it by omission; the caller has to state which it wants." >&2
-            exit 1
-          fi
-          echo "invoker_iam_disabled is required, as intended."
+          status=0
+          for name in invoker_iam_disabled cleanup_policies; do
+            block=$(awk -v n="$name" '$0 ~ "^variable \"" n "\"" {f=1} f&&/^\}/{f=0;print;next} f' variables.tf)
+            if [ -z "${block}" ]; then
+              echo "No ${name} in ${{ matrix.module }}; nothing to check."
+              continue
+            fi
+            if printf '%s\n' "${block}" | grep -qE '^[[:space:]]*default[[:space:]]*='; then
+              echo "::error::${name} must have no default in ${{ matrix.module }}. Both directions change behaviour for a caller that said nothing, so the caller has to state which it wants." >&2
+              status=1
+            else
+              echo "${name} is required, as intended."
+            fi
+          done
+          exit "${status}"
 
       # Named by presence, not by module. The previous step hardcoded
       # modules/monitoring, so a second module's tests would have been written

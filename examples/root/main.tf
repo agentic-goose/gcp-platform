@@ -39,6 +39,14 @@ module "artifact_registry" {
   location      = var.region
   repository_id = "applications"
 
+  # Stated because the module requires it. `null` would mean no cleanup at all;
+  # an example that silently inherited deletion is how a caller ends up pruning
+  # images it still needs to roll back to.
+  cleanup_policies = {
+    keep_count        = 10
+    delete_older_than = "2592000s"
+  }
+
   depends_on = [module.bootstrap]
 }
 
